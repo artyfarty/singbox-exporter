@@ -11,6 +11,7 @@ The upstream clash-exporter has no outbound/proxy state metrics. This fork adds 
 - **`clash_outbound_up`** — whether each outbound is alive (1), down (0), or never tested (-1)
 - **`clash_outbound_delay_ms`** — last measured latency per outbound
 - **`clash_outbound_group_info`** — group metadata: members, currently selected outbound
+- **`clash_outbound_group_selected`** — currently active outbound per group (designed for Grafana State Timeline)
 
 Delay data is read passively from sing-box's history (populated automatically for URLTest groups). No active delay tests are triggered.
 
@@ -69,6 +70,7 @@ CLASH_HOST=<singbox-ip>:9090 ./singbox-exporter -port 2112
 | `clash_outbound_up` | Gauge | `name`, `type`, `group` |
 | `clash_outbound_delay_ms` | Gauge | `name`, `type`, `group` |
 | `clash_outbound_group_info` | Gauge | `name`, `type`, `now`, `members` |
+| `clash_outbound_group_selected` | Gauge | `group`, `selected` |
 
 ### Prometheus config
 
@@ -83,4 +85,59 @@ CLASH_HOST=<singbox-ip>:9090 ./singbox-exporter -port 2112
 ### Grafana
 
 Import [dashboard.json](./grafana/dashboard.json) or use Grafana dashboard ID `18530` as a starting point.
+
+#### State Timeline: active outbound per group
+
+The `clash_outbound_group_selected` metric tracks which outbound is currently active in each Selector/URLTest/Fallback group. It emits a gauge of `1` with the active proxy name in the `selected` label.
+
+To visualize selection changes over time, add a **State Timeline** panel with:
+
+- **Query**: `clash_outbound_group_selected{group="<your-group>"}`
+- **Legend**: `{{group}}`
+- **Value mappings** (optional): map `1` to `{{selected}}` or use a **Rename by regex** transformation
+
+Alternatively, to show all groups at once:
+
+```
+clash_outbound_group_selected
+```
+
+With **Legend** set to `{{group}}` and a **Rename by regex** or **Extract fields** transform to surface the `selected` label as the displayed state.
+
+Minimal State Timeline panel JSON for Grafana:
+
+```json
+{
+  "type": "state-timeline",
+  "title": "Active Outbound per Group",
+  "datasource": { "type": "prometheus" },
+  "targets": [
+    {
+      "expr": "clash_outbound_group_selected",
+      "legendFormat": "{{group}}",
+      "refId": "A"
+    }
+  ],
+  "fieldConfig": {
+    "defaults": {
+      "custom": {
+        "fillOpacity": 80,
+        "lineWidth": 0
+      }
+    }
+  },
+  "options": {
+    "showValue": "always"
+  },
+  "transformations": [
+    {
+      "id": "renameByRegex",
+      "options": {
+        "regex": ".*selected=\"([^\"]+)\".*",
+        "renamePattern": "$1"
+      }
+    }
+  ]
+}
+```
 

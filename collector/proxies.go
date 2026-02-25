@@ -31,9 +31,10 @@ type proxiesResponse struct {
 }
 
 var (
-	outboundUp        *prometheus.GaugeVec
-	outboundDelayMs   *prometheus.GaugeVec
-	outboundGroupInfo *prometheus.GaugeVec
+	outboundUp            *prometheus.GaugeVec
+	outboundDelayMs       *prometheus.GaugeVec
+	outboundGroupInfo     *prometheus.GaugeVec
+	outboundGroupSelected *prometheus.GaugeVec
 )
 
 type Proxies struct{}
@@ -100,6 +101,7 @@ func collectProxies(config CollectConfig) error {
 	outboundUp.Reset()
 	outboundDelayMs.Reset()
 	outboundGroupInfo.Reset()
+	outboundGroupSelected.Reset()
 
 	for name, info := range result.Proxies {
 		// Determine up status and delay from history
@@ -136,6 +138,10 @@ func collectProxies(config CollectConfig) error {
 				info.Now,
 				strconv.Itoa(len(info.All)),
 			).Set(1)
+
+			if info.Now != "" {
+				outboundGroupSelected.WithLabelValues(name, info.Now).Set(1)
+			}
 		}
 	}
 
@@ -170,6 +176,15 @@ func init() {
 		[]string{"name", "type", "now", "members"},
 	)
 
-	prometheus.MustRegister(outboundUp, outboundDelayMs, outboundGroupInfo)
+	outboundGroupSelected = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: "clash",
+			Name:      "outbound_group_selected",
+			Help:      "Currently selected outbound for each group. Always 1. Use the 'selected' label for the active proxy name.",
+		},
+		[]string{"group", "selected"},
+	)
+
+	prometheus.MustRegister(outboundUp, outboundDelayMs, outboundGroupInfo, outboundGroupSelected)
 	Register(new(Proxies))
 }
