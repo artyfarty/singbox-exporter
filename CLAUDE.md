@@ -86,7 +86,7 @@ All metrics use the `clash_` namespace prefix (kept for backward compat with exi
 | `clash_outbound_up` | name, type, group | 1=alive, 0=down, -1=never tested |
 | `clash_outbound_delay_ms` | name, type, group | Last delay in ms |
 | `clash_outbound_group_info` | name, type, now, members | Group metadata (always 1) |
-| `clash_outbound_group_selected` | group, selected | Currently active outbound per group (always 1) |
+| `clash_outbound_group_selected` | group, name | 1=selected, 0=not selected per group member |
 
 The `group` label on `up`/`delay_ms` means one series per group membership. A proxy in 3 groups gets 3 series.
 

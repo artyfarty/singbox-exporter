@@ -70,7 +70,7 @@ CLASH_HOST=<singbox-ip>:9090 ./singbox-exporter -port 2112
 | `clash_outbound_up` | Gauge | `name`, `type`, `group` |
 | `clash_outbound_delay_ms` | Gauge | `name`, `type`, `group` |
 | `clash_outbound_group_info` | Gauge | `name`, `type`, `now`, `members` |
-| `clash_outbound_group_selected` | Gauge | `group`, `selected` |
+| `clash_outbound_group_selected` | Gauge | `group`, `name` |
 
 ### Prometheus config
 
@@ -88,21 +88,13 @@ Import [dashboard.json](./grafana/dashboard.json) or use Grafana dashboard ID `1
 
 #### State Timeline: active outbound per group
 
-The `clash_outbound_group_selected` metric tracks which outbound is currently active in each Selector/URLTest/Fallback group. It emits a gauge of `1` with the active proxy name in the `selected` label.
+The `clash_outbound_group_selected` metric emits `1` for the currently selected member and `0` for all other members in each Selector/URLTest/Fallback group.
 
 To visualize selection changes over time, add a **State Timeline** panel with:
 
 - **Query**: `clash_outbound_group_selected{group="<your-group>"}`
-- **Legend**: `{{group}}`
-- **Value mappings** (optional): map `1` to `{{selected}}` or use a **Rename by regex** transformation
-
-Alternatively, to show all groups at once:
-
-```
-clash_outbound_group_selected
-```
-
-With **Legend** set to `{{group}}` and a **Rename by regex** or **Extract fields** transform to surface the `selected` label as the displayed state.
+- **Legend**: `{{name}}`
+- **Value mappings**: `1` → "Active", `0` → "Standby"
 
 Minimal State Timeline panel JSON for Grafana:
 
@@ -113,31 +105,28 @@ Minimal State Timeline panel JSON for Grafana:
   "datasource": { "type": "prometheus" },
   "targets": [
     {
-      "expr": "clash_outbound_group_selected",
-      "legendFormat": "{{group}}",
+      "expr": "clash_outbound_group_selected{group=~\"group1|group2\"}",
+      "legendFormat": "{{group}}: {{name}}",
       "refId": "A"
     }
   ],
   "fieldConfig": {
     "defaults": {
       "custom": {
-        "fillOpacity": 80,
+        "fillOpacity": 70,
         "lineWidth": 0
-      }
+      },
+      "mappings": [
+        { "type": "value", "options": { "0": { "text": "Standby", "color": "dark-red" } } },
+        { "type": "value", "options": { "1": { "text": "Active", "color": "dark-green" } } }
+      ]
     }
   },
   "options": {
-    "showValue": "always"
-  },
-  "transformations": [
-    {
-      "id": "renameByRegex",
-      "options": {
-        "regex": ".*selected=\"([^\"]+)\".*",
-        "renamePattern": "$1"
-      }
-    }
-  ]
+    "mergeValues": true,
+    "showValue": "auto",
+    "rowHeight": 0.9
+  }
 }
 ```
 

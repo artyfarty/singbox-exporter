@@ -139,8 +139,12 @@ func collectProxies(config CollectConfig) error {
 				strconv.Itoa(len(info.All)),
 			).Set(1)
 
-			if info.Now != "" {
-				outboundGroupSelected.WithLabelValues(name, info.Now).Set(1)
+			for _, member := range info.All {
+				if member == info.Now {
+					outboundGroupSelected.WithLabelValues(name, member).Set(1)
+				} else {
+					outboundGroupSelected.WithLabelValues(name, member).Set(0)
+				}
 			}
 		}
 	}
@@ -180,9 +184,9 @@ func init() {
 		prometheus.GaugeOpts{
 			Namespace: "clash",
 			Name:      "outbound_group_selected",
-			Help:      "Currently selected outbound for each group. Always 1. Use the 'selected' label for the active proxy name.",
+			Help:      "Whether each member is the currently selected outbound in its group. 1=selected, 0=not selected.",
 		},
-		[]string{"group", "selected"},
+		[]string{"group", "name"},
 	)
 
 	prometheus.MustRegister(outboundUp, outboundDelayMs, outboundGroupInfo, outboundGroupSelected)
