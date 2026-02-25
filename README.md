@@ -1,106 +1,76 @@
-## Clash Exporter
+## singbox-exporter
 
-This is an exporter for Clash, for used by the [Prometheus](https://prometheus.io/) to monitor clash network traffic.
+Prometheus exporter for [sing-box](https://sing-box.sagernet.org/) proxy. Vibe-coded fork of [zxh326/clash-exporter](https://github.com/zxh326/clash-exporter), adapted for sing-box's Clash-compatible API.
 
-<table>
-<tr>
-<td>
-<img src='https://user-images.githubusercontent.com/21299255/237983272-46fa121e-3395-4e12-919a-52bc73e90ec0.png' />
-</td>
-<td>
-<img src='https://user-images.githubusercontent.com/21299255/237983285-0363e138-bd76-4e3b-a4a9-dcf3e92a182b.png' />
-</td>
-</tr>
-</table>
+All metrics keep the `clash_` namespace prefix for backward compatibility with existing Grafana dashboards.
+
+### Docker
+
+```
+docker pull ghcr.io/artyfarty/singbox-exporter:main
+```
+
+docker-compose example:
+
+```yaml
+  singbox-exporter:
+    image: ghcr.io/artyfarty/singbox-exporter:main
+    container_name: singbox-exporter
+    entrypoint: ["/app/clash-exporter", "-collectDest=true"]
+    environment:
+      - CLASH_HOST=<singbox-ip>:9090
+      - CLASH_TOKEN=
+    restart: always
+    ports:
+      - 2112:2112
+```
+
+`CLASH_HOST` should point to sing-box's `external_controller` address.
+
+### Build from source
+
+```sh
+go build -o singbox-exporter .
+CLASH_HOST=<singbox-ip>:9090 ./singbox-exporter -port 2112
+```
 
 ### Usage
 
-#### run in command
-
-Go to https://github.com/zxh326/clash-exporter/releases download latest release binary file
-
-```sh
-➜  ./clash-exporter -h
-Usage of ./clash-exporter:
+```
   -collectDest
-        enable collector dest
-        Warning: if collector destination enabled, will generate a large number of metrics, which may put a lot of pressure on Prometheus. (default true)
+        enable per-destination traffic metrics (default true)
+        Warning: generates a large number of metrics
   -collectTracing
-        enable collector tracing.
-        It must be the Clash premium version, and the profile.tracing must be enabled in the Clash configuration file. (default false)
+        enable tracing metrics (default false)
+        Note: sing-box currently stubs this endpoint (404)
   -port int
         port to listen on (default 2112)
 ```
 
-#### deploy with docker compose
+### Metrics
 
-```sh
-git clone https://github.com/zxh326/clash-exporter
+| Metric | Type | Labels |
+|--------|------|--------|
+| `clash_info` | Gauge | `version`, `premium` |
+| `clash_download_bytes_total` | Gauge | |
+| `clash_upload_bytes_total` | Gauge | |
+| `clash_active_connections` | Gauge | |
+| `clash_network_traffic_bytes_total` | Counter | `source`, `destination`, `policy`, `type` |
+| `clash_outbound_up` | Gauge | `name`, `type`, `group` |
+| `clash_outbound_delay_ms` | Gauge | `name`, `type`, `group` |
+| `clash_outbound_group_info` | Gauge | `name`, `type`, `now`, `members` |
 
-# check docker-compose.yml and update environment
-cat docker-compose.yml
-docker compose up -d
-```
-
-
-- visit `localhost:2112/metrics` to check metrics
-- visit `localhost:3000` [add prometheus data source first](https://grafana.com/docs/grafana/latest/administration/data-source-management/)
-- visit `localhost:3000` and import [example dashboard](./grafana/dashboard.json) or via id `18530`
-
-> tips: grafana default username / password is admin/admin
-
-### Prometheus Example Config
+### Prometheus config
 
 ```yaml
-- job_name: "clash"
+- job_name: "singbox"
   metrics_path: /metrics
   scrape_interval: 1s
   static_configs:
     - targets: ["127.0.0.1:2112"]
 ```
 
-#### Record Rule Config
+### Grafana
 
-```
-groups:
-  - name: discard_destination
-    rules:
-      - record: source_policy_type:clash_network_traffic_bytes_total:sum
-        expr: sum without (destination, job) (clash_network_traffic_bytes_total)
-```
+Import [dashboard.json](./grafana/dashboard.json) or use Grafana dashboard ID `18530` as a starting point.
 
-### Grafana Example Dashboard
-
-- You can import [clash-dashboard.json](./grafana/dashboard.json) to obtain the example effect, or you can create one yourself based on the following metrics introduction.
-
-- or Import via [grafana.com](https://grafana.com/grafana/dashboards/18530-clash-dashboard/) with id `18530`
-
-### Metrics
-
-| Metric name                                     | Metric type | Labels                                                              |
-| ----------------------------------------------- | ----------- | ------------------------------------------------------------------- |
-| clash_info                                      | Gauge       | `version`, `premium`                                                |
-| clash_download_bytes_total                      | Gauge       |                                                                     |
-| clash_upload_bytes_total                        | Gauge       |                                                                     |
-| clash_active_connections                        | Gauge       |                                                                     |
-| clash_network_traffic_bytes_total               | Counter     | `source`,`destination(if enabled)`,`policy`,`type(download,upload)` |
-| clash_tracing_rule_match_duration_milliseconds  | Histogram   |                                                                     |
-| clash_tracing_dns_request_duration_milliseconds | Histogram   | `type(dnsType)`                                                     |
-| clash_tracing_proxy_dial_duration_milliseconds  | Histogram   | `policy`                                                            |
-
-### FAQ
-
-- tracing metrics is empty
-
-  - Required clash premium version
-  - Follow [clash profile docs](https://github.com/Dreamacro/clash/wiki/Clash-Premium-Features#tracing) enable profile tracing
-  - Add `-collectTracing=true` flag in clash-exporter start script
-
-- high Prometheus Memory
-
-  This may be caused by the default enable of collector destination traffic, which can generate a large number of metrics. Try use `-collectDest=false` disable it.
-
-### TODO
-
-- [x] dns query metrics
-- [x] proxy dial metrics
