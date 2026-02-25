@@ -70,7 +70,7 @@ CLASH_HOST=<singbox-ip>:9090 ./singbox-exporter -port 2112
 | `clash_outbound_up` | Gauge | `name`, `type`, `group` |
 | `clash_outbound_delay_ms` | Gauge | `name`, `type`, `group` |
 | `clash_outbound_group_info` | Gauge | `name`, `type`, `now`, `members` |
-| `clash_outbound_group_selected` | Gauge | `group`, `name` |
+| `clash_outbound_group_selected` | Gauge | `group`, `selected` |
 
 ### Prometheus config
 
@@ -88,13 +88,17 @@ Import [dashboard.json](./grafana/dashboard.json) or use Grafana dashboard ID `1
 
 #### State Timeline: active outbound per group
 
-The `clash_outbound_group_selected` metric emits `1` for the currently selected member and `0` for all other members in each Selector/URLTest/Fallback group.
+The `clash_outbound_group_selected` metric emits a gauge of `1` for the currently selected outbound in each Selector/URLTest/Fallback group. Only the active member is emitted; the `selected` label identifies it.
+
+When the active proxy changes, the old series disappears and a new one appears. Grafana State Timeline shows each proxy-that-was-ever-active as a row with a colored band during its active period.
 
 To visualize selection changes over time, add a **State Timeline** panel with:
 
-- **Query**: `clash_outbound_group_selected{group="<your-group>"}`
-- **Legend**: `{{name}}`
-- **Value mappings**: `1` → "Active", `0` → "Standby"
+- **Query**: `clash_outbound_group_selected{group=~"group1|group2"}`
+- **Legend**: `{{group}}: {{selected}}`
+- **Value mappings**: `1` → "Active" (green)
+- **Merge values**: on (merges contiguous identical values into one band)
+- **Show value**: `never` (the row label already shows the proxy name)
 
 Minimal State Timeline panel JSON for Grafana:
 
@@ -106,7 +110,7 @@ Minimal State Timeline panel JSON for Grafana:
   "targets": [
     {
       "expr": "clash_outbound_group_selected{group=~\"group1|group2\"}",
-      "legendFormat": "{{group}}: {{name}}",
+      "legendFormat": "{{group}}: {{selected}}",
       "refId": "A"
     }
   ],
@@ -117,14 +121,13 @@ Minimal State Timeline panel JSON for Grafana:
         "lineWidth": 0
       },
       "mappings": [
-        { "type": "value", "options": { "0": { "text": "Standby", "color": "dark-red" } } },
         { "type": "value", "options": { "1": { "text": "Active", "color": "dark-green" } } }
       ]
     }
   },
   "options": {
     "mergeValues": true,
-    "showValue": "auto",
+    "showValue": "never",
     "rowHeight": 0.9
   }
 }
