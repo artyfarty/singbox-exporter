@@ -4,6 +4,16 @@ Prometheus exporter for [sing-box](https://sing-box.sagernet.org/) proxy. Vibe-c
 
 All metrics keep the `clash_` namespace prefix for backward compatibility with existing Grafana dashboards.
 
+### What this fork adds
+
+The upstream clash-exporter has no outbound/proxy state metrics. This fork adds a collector that polls sing-box's `/proxies` endpoint and exposes:
+
+- **`clash_outbound_up`** — whether each outbound is alive (1), down (0), or never tested (-1)
+- **`clash_outbound_delay_ms`** — last measured latency per outbound
+- **`clash_outbound_group_info`** — group metadata: members, currently selected outbound
+
+Delay data is read passively from sing-box's history (populated automatically for URLTest groups). No active delay tests are triggered.
+
 ### Docker
 
 ```
