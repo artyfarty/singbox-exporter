@@ -88,12 +88,20 @@ func collectProxies(config CollectConfig) error {
 
 	// Build reverse map: proxy name -> list of groups it belongs to
 	groupMembership := make(map[string][]string)
+	// Track members of URLTest groups — these get tested automatically,
+	// so empty history means the test failed (down), not never tested.
+	urlTestMembers := make(map[string]bool)
 	for groupName, info := range result.Proxies {
 		if len(info.All) == 0 {
 			continue
 		}
 		for _, member := range info.All {
 			groupMembership[member] = append(groupMembership[member], groupName)
+		}
+		if info.Type == "URLTest" {
+			for _, member := range info.All {
+				urlTestMembers[member] = true
+			}
 		}
 	}
 
@@ -116,6 +124,9 @@ func collectProxies(config CollectConfig) error {
 			} else {
 				up = 0
 			}
+		} else if urlTestMembers[name] {
+			// URLTest groups auto-test members; empty history means test failed
+			up = 0
 		}
 
 		// Emit per-group membership for leaf outbounds
