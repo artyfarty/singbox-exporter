@@ -98,7 +98,7 @@ func collectProxies(config CollectConfig) error {
 		for _, member := range info.All {
 			groupMembership[member] = append(groupMembership[member], groupName)
 		}
-		if info.Type == "URLTest" {
+		if info.Type == "URLTest" && len(info.All) > 1 {
 			for _, member := range info.All {
 				urlTestMembers[member] = true
 			}
