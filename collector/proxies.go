@@ -126,35 +126,41 @@ func collectProxies(config CollectConfig) error {
 		var delay float64
 
 		if probeDelay, ok := probeResults[name]; ok {
+			// Leaf proxy — use active probe result
 			if probeDelay > 0 {
 				up = 1
 				delay = float64(probeDelay)
 			} else {
 				delay = 99999
 			}
-		} else if len(info.All) == 0 {
+		} else if len(info.All) > 0 {
+			// Group — infer from history
+			up = -1
+			if len(info.History) > 0 {
+				last := info.History[len(info.History)-1]
+				delay = float64(last.Delay)
+				if last.Delay > 0 {
+					up = 1
+				} else {
+					up = 0
+				}
+			}
+		} else {
 			// Direct or other non-probed leaf — skip
 			continue
-		} else {
-			// Group — not probed, skip up/delay
-			goto emitGroup
 		}
 
 		// Emit per-group membership for leaf outbounds
-		{
-			groups := groupMembership[name]
-			if len(groups) > 0 {
-				for _, g := range groups {
-					outboundUp.WithLabelValues(name, info.Type, g).Set(up)
-					outboundDelayMs.WithLabelValues(name, info.Type, g).Set(delay)
-				}
-			} else {
-				outboundUp.WithLabelValues(name, info.Type, "").Set(up)
-				outboundDelayMs.WithLabelValues(name, info.Type, "").Set(delay)
+		groups := groupMembership[name]
+		if len(groups) > 0 {
+			for _, g := range groups {
+				outboundUp.WithLabelValues(name, info.Type, g).Set(up)
+				outboundDelayMs.WithLabelValues(name, info.Type, g).Set(delay)
 			}
+		} else {
+			outboundUp.WithLabelValues(name, info.Type, "").Set(up)
+			outboundDelayMs.WithLabelValues(name, info.Type, "").Set(delay)
 		}
-
-	emitGroup:
 		// Emit group info for groups (those with members)
 		if len(info.All) > 0 {
 			outboundGroupInfo.WithLabelValues(
