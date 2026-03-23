@@ -13,12 +13,12 @@ import (
 )
 
 type proxyInfo struct {
-	Type    string            `json:"type"`
-	Name    string            `json:"name"`
-	UDP     bool              `json:"udp"`
-	History []delayHistory    `json:"history"`
-	All     []string          `json:"all"`
-	Now     string            `json:"now"`
+	Type    string         `json:"type"`
+	Name    string         `json:"name"`
+	UDP     bool           `json:"udp"`
+	History []delayHistory `json:"history"`
+	All     []string       `json:"all"`
+	Now     string         `json:"now"`
 }
 
 type delayHistory struct {
@@ -30,11 +30,21 @@ type proxiesResponse struct {
 	Proxies map[string]proxyInfo `json:"proxies"`
 }
 
+type delayResponse struct {
+	Delay   int    `json:"delay"`
+	Message string `json:"message"`
+}
+
 var (
 	outboundUp            *prometheus.GaugeVec
 	outboundDelayMs       *prometheus.GaugeVec
 	outboundGroupInfo     *prometheus.GaugeVec
 	outboundGroupSelected *prometheus.GaugeVec
+)
+
+const (
+	probeURL     = "https://www.gstatic.com/generate_204"
+	probeTimeout = 1500 // ms
 )
 
 type Proxies struct{}
@@ -45,10 +55,9 @@ func (*Proxies) Name() string {
 
 func (*Proxies) Collect(config CollectConfig) error {
 	log.Println("starting collector: proxies")
-	ticker := time.NewTicker(15 * time.Second)
+	ticker := time.NewTicker(60 * time.Second)
 	defer ticker.Stop()
 
-	// collect immediately, then on each tick
 	if err := collectProxies(config); err != nil {
 		return err
 	}
@@ -88,9 +97,6 @@ func collectProxies(config CollectConfig) error {
 
 	// Build reverse map: proxy name -> list of groups it belongs to
 	groupMembership := make(map[string][]string)
-	// Track members of URLTest groups — these get tested automatically,
-	// so empty history means the test failed (down), not never tested.
-	urlTestMembers := make(map[string]bool)
 	for groupName, info := range result.Proxies {
 		if len(info.All) == 0 {
 			continue
@@ -98,11 +104,15 @@ func collectProxies(config CollectConfig) error {
 		for _, member := range info.All {
 			groupMembership[member] = append(groupMembership[member], groupName)
 		}
-		if info.Type == "URLTest" && len(info.All) > 1 {
-			for _, member := range info.All {
-				urlTestMembers[member] = true
-			}
+	}
+
+	// Active probe leaf proxies sequentially (not groups, not Direct)
+	probeResults := make(map[string]int)
+	for name, info := range result.Proxies {
+		if len(info.All) > 0 || info.Type == "Direct" {
+			continue
 		}
+		probeResults[name] = probeProxy(config, name)
 	}
 
 	// Reset to clear stale series
@@ -112,35 +122,39 @@ func collectProxies(config CollectConfig) error {
 	outboundGroupSelected.Reset()
 
 	for name, info := range result.Proxies {
-		// Determine up status and delay from history
-		var up float64 = -1 // never tested
+		var up float64
 		var delay float64
 
-		if len(info.History) > 0 {
-			last := info.History[len(info.History)-1]
-			delay = float64(last.Delay)
-			if last.Delay > 0 {
+		if probeDelay, ok := probeResults[name]; ok {
+			if probeDelay > 0 {
 				up = 1
+				delay = float64(probeDelay)
 			} else {
-				up = 0
+				delay = 99999
 			}
-		} else if urlTestMembers[name] {
-			// URLTest groups auto-test members; empty history means test failed
-			up = 0
+		} else if len(info.All) == 0 {
+			// Direct or other non-probed leaf — skip
+			continue
+		} else {
+			// Group — not probed, skip up/delay
+			goto emitGroup
 		}
 
 		// Emit per-group membership for leaf outbounds
-		groups := groupMembership[name]
-		if len(groups) > 0 {
-			for _, g := range groups {
-				outboundUp.WithLabelValues(name, info.Type, g).Set(up)
-				outboundDelayMs.WithLabelValues(name, info.Type, g).Set(delay)
+		{
+			groups := groupMembership[name]
+			if len(groups) > 0 {
+				for _, g := range groups {
+					outboundUp.WithLabelValues(name, info.Type, g).Set(up)
+					outboundDelayMs.WithLabelValues(name, info.Type, g).Set(delay)
+				}
+			} else {
+				outboundUp.WithLabelValues(name, info.Type, "").Set(up)
+				outboundDelayMs.WithLabelValues(name, info.Type, "").Set(delay)
 			}
-		} else {
-			outboundUp.WithLabelValues(name, info.Type, "").Set(up)
-			outboundDelayMs.WithLabelValues(name, info.Type, "").Set(delay)
 		}
 
+	emitGroup:
 		// Emit group info for groups (those with members)
 		if len(info.All) > 0 {
 			outboundGroupInfo.WithLabelValues(
@@ -150,7 +164,7 @@ func collectProxies(config CollectConfig) error {
 				strconv.Itoa(len(info.All)),
 			).Set(1)
 
-				for _, member := range info.All {
+			for _, member := range info.All {
 				if member == info.Now {
 					outboundGroupSelected.WithLabelValues(name, member).Set(1)
 				} else {
@@ -163,12 +177,45 @@ func collectProxies(config CollectConfig) error {
 	return nil
 }
 
+// probeProxy tests a single proxy's delay. Returns delay in ms (>0 = alive, 0 = failed/timeout).
+func probeProxy(config CollectConfig, name string) int {
+	endpoint := fmt.Sprintf("http://%s/proxies/%s/delay?url=%s&timeout=%d",
+		config.ClashHost, name, probeURL, probeTimeout)
+
+	req, err := http.NewRequest("GET", endpoint, nil)
+	if err != nil {
+		return 0
+	}
+	if config.ClashToken != "" {
+		req.Header.Add("Authorization", fmt.Sprintf("Bearer %s", config.ClashToken))
+	}
+
+	client := &http.Client{Timeout: time.Duration(probeTimeout+1000) * time.Millisecond}
+	resp, err := client.Do(req)
+	if err != nil {
+		return 0
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return 0
+	}
+
+	var dr delayResponse
+	if err := json.Unmarshal(body, &dr); err != nil {
+		return 0
+	}
+
+	return dr.Delay
+}
+
 func init() {
 	outboundUp = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: "clash",
 			Name:      "outbound_up",
-			Help:      "Whether the outbound is up (1), down (0), or never tested (-1), based on last delay test.",
+			Help:      "Whether the outbound is up (1) or down (0), based on active delay probe.",
 		},
 		[]string{"name", "type", "group"},
 	)
@@ -177,7 +224,7 @@ func init() {
 		prometheus.GaugeOpts{
 			Namespace: "clash",
 			Name:      "outbound_delay_ms",
-			Help:      "Last measured delay in milliseconds for the outbound. 0 if failed or untested.",
+			Help:      "Last measured delay in milliseconds from active probe. 99999 if failed or timed out.",
 		},
 		[]string{"name", "type", "group"},
 	)

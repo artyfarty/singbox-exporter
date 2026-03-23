@@ -23,7 +23,7 @@ Self-registering collector pattern. Each collector in `collector/` calls `Regist
 | `collector/info.go` | Info | `GET /version` | One-shot HTTP request |
 | `collector/connections.go` | Connection | `ws:///connections` | Persistent WebSocket stream |
 | `collector/tracing.go` | Tracing | `ws:///profile/tracing` | Persistent WebSocket stream (opt-in via `-collectTracing`) |
-| `collector/proxies.go` | Proxies | `GET /proxies` | HTTP polling every 15s |
+| `collector/proxies.go` | Proxies | `GET /proxies` + `GET /proxies/{name}/delay` | HTTP polling every 60s with active delay probing |
 
 ### Adding a new collector
 
@@ -49,7 +49,7 @@ Sing-box exposes a Clash-compatible API at the `external_controller` address. Au
 | `/proxies` | GET | proxies.go | Returns all outbounds: groups + leaves. See below. |
 | `/group` | GET | (unused) | Returns only groups. Subset of `/proxies`. |
 | `/group/{name}/delay?url=...&timeout=ms` | GET | (unused) | Triggers active delay test for all group members. Returns `{"member": delay_ms}`. |
-| `/proxies/{name}/delay?url=...&timeout=ms` | GET | (unused) | Tests single proxy delay. |
+| `/proxies/{name}/delay?url=...&timeout=ms` | GET | proxies.go | Tests single proxy delay. Returns `{"delay": ms}` or `{"message": "Timeout"}`. |
 | `/profile/tracing` | WS | tracing.go | Stubbed (404) in current sing-box. |
 | `/memory` | GET/WS | (unused) | `{"inuse": bytes, "oslimit": 0}` |
 
@@ -83,8 +83,8 @@ All metrics use the `clash_` namespace prefix (kept for backward compat with exi
 
 | Metric | Labels | Description |
 |--------|--------|-------------|
-| `clash_outbound_up` | name, type, group | 1=alive, 0=down, -1=never tested |
-| `clash_outbound_delay_ms` | name, type, group | Last delay in ms |
+| `clash_outbound_up` | name, type, group | 1=alive, 0=down (active probe) |
+| `clash_outbound_delay_ms` | name, type, group | Last delay in ms from active probe (99999=failed/timeout) |
 | `clash_outbound_group_info` | name, type, now, members | Group metadata (always 1) |
 | `clash_outbound_group_selected` | group, name | Per-member boolean: 1=selected, 0=not selected |
 
