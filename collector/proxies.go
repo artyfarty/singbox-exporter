@@ -12,6 +12,25 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 )
 
+// builtinProxyTypes are the core's own pseudo-outbounds — they answer the
+// Clash API like any other proxy but are not exits, so probing them is
+// meaningless and the failure is permanent.
+//
+// sing-box exposes only `Direct`. mihomo adds four more, and until they were
+// filtered they showed up as five outbounds that are red forever
+// (REJECT, REJECT-DROP, PASS, PASS-RULE, COMPATIBLE) — noise on every
+// "is anything down?" panel. Matching on type rather than name keeps this
+// working if a core renames them.
+var builtinProxyTypes = map[string]bool{
+	"Direct":     true,
+	"Reject":     true,
+	"RejectDrop": true,
+	"Pass":       true,
+	"PassRule":   true,
+	"Compatible": true,
+	"Dns":        true,
+}
+
 type proxyInfo struct {
 	Type    string         `json:"type"`
 	Name    string         `json:"name"`
@@ -106,10 +125,10 @@ func collectProxies(config CollectConfig) error {
 		}
 	}
 
-	// Active probe leaf proxies sequentially (not groups, not Direct)
+	// Active probe leaf proxies sequentially (not groups, not built-ins)
 	probeResults := make(map[string]int)
 	for name, info := range result.Proxies {
-		if len(info.All) > 0 || info.Type == "Direct" {
+		if len(info.All) > 0 || builtinProxyTypes[info.Type] {
 			continue
 		}
 		probeResults[name] = probeProxy(config, name)
@@ -146,7 +165,7 @@ func collectProxies(config CollectConfig) error {
 				}
 			}
 		} else {
-			// Direct or other non-probed leaf — skip
+			// built-in pseudo-outbound or other non-probed leaf — skip
 			continue
 		}
 
